@@ -161,24 +161,37 @@ function getBestLabelPosition(layer, countyId) {
   var viewEast = Math.min(countyBounds.getEast(), mapBounds.getEast());
   if (viewSouth >= viewNorth || viewWest >= viewEast) return null;
 
-  // 4. Calculate minimum boundary distance (20% of visible bbox to avoid overlap with outline)
+  // 4. Calculate minimum boundary distance (30% of visible bbox to ensure labels stay well inside)
   var minBoundaryDistMeters = Math.min(
     map.distance([viewSouth, viewWest], [viewNorth, viewWest]),
     map.distance([viewSouth, viewWest], [viewSouth, viewEast])
-  ) * 0.20;
+  ) * 0.30;
 
-  // 5. Spiral search from map center: evaluate all rules point by point
+  // 5. Thorough spiral search from map center: evaluate all rules point by point
   var mapCenter = map.getCenter();
   var centerLat = mapCenter.lat;
   var centerLng = mapCenter.lng;
-  var step = Math.max((viewNorth - viewSouth), (viewEast - viewWest)) / 80;
+  var step = Math.max((viewNorth - viewSouth), (viewEast - viewWest)) / 120; // Finer grid
   var maxRadius = Math.max((viewNorth - viewSouth), (viewEast - viewWest)) / 2;
   var center = L.latLng(centerLat, centerLng);
   var bestLatLng = null;
   var minDist = Infinity;
 
+  // First try the geometric center of the county if it's valid
+  var geomCenter = getCountyCenter(countyId);
+  if (geomCenter) {
+    var candidate = L.latLng(geomCenter.lat, geomCenter.lng);
+    if (mapBounds.contains(candidate) && 
+        pointInPolygon(candidate, layer) &&
+        (!avoidLocation || candidate.distanceTo(avoidLocation) >= minDistanceMeters) &&
+        minDistanceToPolygonBoundary(candidate, layer) >= minBoundaryDistMeters) {
+      return candidate;
+    }
+  }
+
+  // Spiral search with smaller angle steps for better coverage
   for (var r = 0; r <= maxRadius; r += step) {
-    for (var angle = 0; angle < 360; angle += 6) {
+    for (var angle = 0; angle < 360; angle += 3) { // Smaller angle steps
       var rad = angle * Math.PI / 180;
       var lat = centerLat + r * Math.cos(rad);
       var lng = centerLng + r * Math.sin(rad);
@@ -190,10 +203,10 @@ function getBestLabelPosition(layer, countyId) {
       // Rule B: Must be inside polygon
       if (!pointInPolygon(candidate, layer)) continue;
       
-      // Rule C: Must not overlap location marker
-      if (avoidLocation && candidate.distanceTo(avoidLocation) < minDistanceMeters) continue;
+      // Rule C: Must not overlap location marker (increased safety margin)
+      if (avoidLocation && candidate.distanceTo(avoidLocation) < minDistanceMeters * 1.2) continue;
       
-      // Rule D: Must be at least minBoundaryDistMeters from polygon outline
+      // Rule D: Must be well inside polygon boundary
       if (minDistanceToPolygonBoundary(candidate, layer) < minBoundaryDistMeters) continue;
       
       // Rule E: Choose closest to map center
@@ -205,6 +218,34 @@ function getBestLabelPosition(layer, countyId) {
     }
     if (bestLatLng) break;
   }
+  
+  // If no position found with strict requirements, try with reduced boundary distance
+  if (!bestLatLng) {
+    var reducedBoundaryDist = minBoundaryDistMeters * 0.5; // Try with 50% of original distance
+    minDist = Infinity;
+    
+    for (var r = 0; r <= maxRadius; r += step) {
+      for (var angle = 0; angle < 360; angle += 3) {
+        var rad = angle * Math.PI / 180;
+        var lat = centerLat + r * Math.cos(rad);
+        var lng = centerLng + r * Math.sin(rad);
+        var candidate = L.latLng(lat, lng);
+        
+        if (!mapBounds.contains(candidate)) continue;
+        if (!pointInPolygon(candidate, layer)) continue;
+        if (avoidLocation && candidate.distanceTo(avoidLocation) < minDistanceMeters * 1.2) continue;
+        if (minDistanceToPolygonBoundary(candidate, layer) < reducedBoundaryDist) continue;
+        
+        var dist = candidate.distanceTo(center);
+        if (dist < minDist) {
+          bestLatLng = candidate;
+          minDist = dist;
+        }
+      }
+      if (bestLatLng) break;
+    }
+  }
+  
   if (bestLatLng) return bestLatLng;
 
   // 6. If no valid position is found, do not show the label
@@ -880,12 +921,11 @@ function minDistanceToPolygonBoundary(latlng, layer) {
       coords = geom.coordinates[0][0];
     }
     if (coords) {
+      // Check distance to each edge of the polygon, not just vertices
       for (var i = 0; i < coords.length - 1; i++) {
         var p1 = L.latLng(coords[i][1], coords[i][0]);
         var p2 = L.latLng(coords[i+1][1], coords[i+1][0]);
-        var dist = map.distance(latlng, p1);
-        if (dist < minDist) minDist = dist;
-        dist = map.distance(latlng, p2);
+        var dist = distanceToLineSegment(latlng, p1, p2);
         if (dist < minDist) minDist = dist;
       }
     }
@@ -893,14 +933,42 @@ function minDistanceToPolygonBoundary(latlng, layer) {
     var latlngs = layer.getLatLngs();
     if (latlngs && latlngs.length > 0) {
       var arr = Array.isArray(latlngs[0][0]) ? latlngs[0][0] : latlngs[0];
+      // Check distance to each edge of the polygon, not just vertices
       for (var i = 0; i < arr.length - 1; i++) {
         var p1 = arr[i], p2 = arr[i+1];
-        var dist = map.distance(latlng, p1);
-        if (dist < minDist) minDist = dist;
-        dist = map.distance(latlng, p2);
+        var dist = distanceToLineSegment(latlng, p1, p2);
         if (dist < minDist) minDist = dist;
       }
     }
   }
   return minDist;
+}
+
+// Helper: calculate distance from point to line segment in meters
+function distanceToLineSegment(point, lineStart, lineEnd) {
+  var A = point.lat - lineStart.lat;
+  var B = point.lng - lineStart.lng;
+  var C = lineEnd.lat - lineStart.lat;
+  var D = lineEnd.lng - lineStart.lng;
+
+  var dot = A * C + B * D;
+  var lenSq = C * C + D * D;
+  var param = -1;
+  if (lenSq !== 0) {
+    param = dot / lenSq;
+  }
+
+  var xx, yy;
+  if (param < 0) {
+    xx = lineStart.lat;
+    yy = lineStart.lng;
+  } else if (param > 1) {
+    xx = lineEnd.lat;
+    yy = lineEnd.lng;
+  } else {
+    xx = lineStart.lat + param * C;
+    yy = lineStart.lng + param * D;
+  }
+
+  return map.distance(point, L.latLng(xx, yy));
 }

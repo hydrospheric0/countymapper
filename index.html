@@ -29,6 +29,16 @@
     }
     .county-label {
       transition: all 0.2s ease-in-out;
+      background: none !important;
+      border: none !important;
+      box-shadow: none !important;
+      background-color: transparent !important;
+    }
+    .county-label.leaflet-div-icon {
+      background: none !important;
+      border: none !important;
+      box-shadow: none !important;
+      background-color: transparent !important;
     }
     .county-label:hover {
       transform: scale(1.05);
@@ -37,23 +47,37 @@
     
     /* Mobile-specific county label styling */
     @media (max-width: 768px) {
+      .county-label {
+        background: none !important;
+        border: none !important;
+        box-shadow: none !important;
+        background-color: transparent !important;
+      }
       .county-label div {
         font-size: 14px !important;
         padding: 0 !important;
         min-width: auto !important;
         white-space: nowrap;
         background: none !important;
+        background-color: transparent !important;
         border: none !important;
         box-shadow: none !important;
       }
     }
     
     @media (max-width: 480px) {
+      .county-label {
+        background: none !important;
+        border: none !important;
+        box-shadow: none !important;
+        background-color: transparent !important;
+      }
       .county-label div {
         font-size: 16px !important;
         padding: 0 !important;
         min-width: auto !important;
         background: none !important;
+        background-color: transparent !important;
         border: none !important;
         box-shadow: none !important;
       }
