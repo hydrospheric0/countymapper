@@ -38,12 +38,22 @@ var layerControl = L.control.layers(baseLayers, {
 map.on('overlayadd', function(e) {
   if (e.name === 'Names' && e.layer === countyLabelsGroup) {
     updateLabels();
+  } else if (e.layer === countyBoundaryGroup && !countyBoundaryLoaded) {
+    loadCountyAtCenter();
   }
 });
 
 map.on('overlayremove', function(e) {
   if (e.name === 'Names' && e.layer === countyLabelsGroup) {
     clearLabels();
+  } else if (e.layer === countyBoundaryGroup) {
+    // Clear both boundaries and labels when outlines are hidden
+    countyLabelsGroup.clearLayers();
+    countyLabels = [];
+    countyBoundaryGroup.clearLayers();
+    countyFeatureLayers = [];
+    countyBoundaryLoaded = false;
+    updateStatus("Counties hidden");
   }
 });
 
@@ -415,6 +425,11 @@ function switchMainCounty(newMainCountyId) {
   
   // Update label positions after switching main county - this will recreate all labels
   setTimeout(updateCountyLabelPositions, 100);
+  
+  // Update location marker popup with new distance info
+  if (locationMarker && userLocation) {
+    locationMarker.setPopupContent(getLocationPopupContent(userLocation.lat, userLocation.lng));
+  }
 }
 
 // Clear all county labels
@@ -742,7 +757,15 @@ function autoLocate() {
         weight: 2,
         opacity: 1,
         fillOpacity: 0.8
-      }).addTo(map).bindPopup("Your location");
+      }).addTo(map);
+      
+      // Set initial popup content
+      locationMarker.bindPopup(getLocationPopupContent(lat, lng));
+      
+      // Update popup content when clicked to ensure latest distance info
+      locationMarker.on('click', function() {
+        locationMarker.setPopupContent(getLocationPopupContent(lat, lng));
+      });
       
       updateStatus("Location found! Loading nearby counties...");
       
@@ -1025,4 +1048,78 @@ function getDistanceToBorderText(countyId) {
   var distanceKm = (distanceToBorder / 1000).toFixed(1);
   var distanceMiles = (distanceToBorder / 1609.34).toFixed(1);
   return ` • ${distanceKm}km (${distanceMiles}mi) to border`;
+}
+
+// Helper function to get location popup content with coordinates and distance
+function getLocationPopupContent(lat, lng) {
+  var coords = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  var distanceInfo = '';
+  
+  // Calculate distance to county border if we have county data
+  if (currentMainCountyId && countyBoundaryGroup) {
+    var userLatLng = L.latLng(lat, lng);
+    var countyLayer = null;
+    
+    countyBoundaryGroup.eachLayer(function(layer) {
+      if (layer.feature && layer.feature.properties && layer.feature.properties.id === currentMainCountyId) {
+        countyLayer = layer;
+      }
+    });
+    
+    if (countyLayer) {
+      var distanceToBorder = minDistanceToPolygonBoundary(userLatLng, countyLayer);
+      if (distanceToBorder < Infinity) {
+        var distanceMiles = distanceToBorder / 1609.34;
+        if (distanceMiles < 0.1) {
+          var distanceYards = Math.round(distanceMiles * 1760);
+          distanceInfo = `<br><strong>Distance to border:</strong> ${distanceYards} yards`;
+        } else {
+          distanceInfo = `<br><strong>Distance to border:</strong> ${distanceMiles.toFixed(2)} miles`;
+        }
+      }
+    }
+  }
+  
+  return `
+    <div style="font-family: monospace; text-align: center; min-width: 200px;">
+      <strong>Your Location</strong><br>
+      <div style="margin: 8px 0; padding: 4px; background: #f0f0f0; border-radius: 3px; position: relative;">
+        <span id="coords-text">${coords}</span>
+        <button onclick="copyCoordinates('${coords}')" style="
+          margin-left: 8px; 
+          background: none; 
+          border: none; 
+          cursor: pointer; 
+          font-size: 14px;
+          color: #666;
+          padding: 2px;
+        " title="Copy coordinates">📋</button>
+      </div>
+      ${distanceInfo}
+    </div>
+  `;
+}
+
+// Helper function to copy coordinates to clipboard
+function copyCoordinates(coords) {
+  navigator.clipboard.writeText(coords).then(function() {
+    // Show temporary feedback
+    var button = event.target;
+    var originalText = button.innerHTML;
+    button.innerHTML = '✓';
+    button.style.color = '#22c55e';
+    setTimeout(function() {
+      button.innerHTML = originalText;
+      button.style.color = '#666';
+    }, 1000);
+  }).catch(function(err) {
+    console.error('Failed to copy coordinates: ', err);
+    // Fallback for older browsers
+    var textArea = document.createElement('textarea');
+    textArea.value = coords;
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+  });
 }
