@@ -9,7 +9,12 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     html, body { height: 100%; margin: 0; padding: 0; font-family: Arial, sans-serif; }
-    #map { width: 100vw; height: 100vh; }
+    #map { 
+      width: 100vw; 
+      height: 100vh; 
+      /* Ensure attribution area is not covered */
+      position: relative;
+    }
     #status {
       position: absolute;
       bottom: 10px;
@@ -29,11 +34,37 @@
       transform: scale(1.05);
       filter: brightness(1.1);
     }
+    /* Ensure Leaflet attribution is visible on mobile */
+    .leaflet-control-attribution {
+      background: rgba(255, 255, 255, 0.9) !important;
+      font-size: 10px !important;
+      line-height: 1.2 !important;
+      padding: 2px 4px !important;
+      border-radius: 3px !important;
+      max-width: calc(100vw - 20px) !important;
+      box-sizing: border-box !important;
+    }
+    
+    .leaflet-control-attribution a {
+      color: #0078A8 !important;
+      text-decoration: none !important;
+    }
+    
     @media (max-width: 768px) {
       #status {
         left: 5px;
         right: 5px;
         max-width: none;
+      }
+      
+      /* Enhanced mobile attribution visibility */
+      .leaflet-control-attribution {
+        font-size: 9px !important;
+        padding: 1px 3px !important;
+        bottom: 2px !important;
+        right: 2px !important;
+        opacity: 0.9 !important;
+        z-index: 1001 !important;
       }
     }
   </style>

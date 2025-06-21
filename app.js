@@ -35,10 +35,44 @@ var currentMainCountyId = null; // Track which county is currently highlighted
 var allCountiesData = null; // Store all county data for switching
 var stateInfo = null; // Store state info
 var userLocation = null; // Store user's location for label positioning
+var countyLabels = []; // Track all county labels for repositioning
 
 function updateStatus(message) {
   statusDiv.textContent = message;
 }
+
+// Update all county label positions when map moves
+function updateCountyLabelPositions() {
+  if (!countyBoundaryGroup || countyLabels.length === 0) return;
+  
+  countyBoundaryGroup.eachLayer(function(layer) {
+    if (layer.feature && layer.feature.properties && layer.label) {
+      // Check if county is currently visible on the map
+      var bounds = map.getBounds();
+      var countyBounds = layer.getBounds();
+      
+      // Only update position if county is visible or partially visible
+      if (bounds.intersects(countyBounds)) {
+        var newPosition = getBestLabelPosition(layer, layer.feature.properties.id);
+        layer.label.setLatLng(newPosition);
+        
+        // Make sure label is visible
+        if (!map.hasLayer(layer.label)) {
+          map.addLayer(layer.label);
+        }
+      } else {
+        // Hide label if county is completely out of view
+        if (map.hasLayer(layer.label)) {
+          map.removeLayer(layer.label);
+        }
+      }
+    }
+  });
+}
+
+// Add map event listeners for label repositioning
+map.on('moveend', updateCountyLabelPositions);
+map.on('zoomend', updateCountyLabelPositions);
 
 // Get styling for county based on whether it's the main county
 function getCountyStyle(isMainCounty) {
@@ -227,6 +261,9 @@ function switchMainCounty(newMainCountyId) {
       console.log('Status updated for:', countyName, stateName);
     }
   }
+  
+  // Update label positions after switching main county
+  setTimeout(updateCountyLabelPositions, 100);
 }
 
 // Handle county boundary toggle
@@ -245,6 +282,10 @@ map.on('overlayremove', function(e) {
       }
     });
     countyBoundaryGroup.clearLayers();
+    
+    // Clear the labels tracking array
+    countyLabels = [];
+    
     countyBoundaryLoaded = false;
     updateStatus("Counties hidden");
   }
@@ -425,7 +466,9 @@ function loadCountyAtCenter() {
                 iconSize: [130, 26],
                 iconAnchor: [65, 13]
               })
-            }).addTo(map);
+            });
+            
+            // Don't add to map initially - will be managed by updateCountyLabelPositions
             
             // Make labels clickable for county switching
             label.on('click', function(e) {
@@ -434,8 +477,12 @@ function loadCountyAtCenter() {
               switchMainCounty(feature.properties.id);
             });
             
-            // Store label reference
+            // Store label reference and add to tracking
             layer.label = label;
+            countyLabels.push(label);
+            
+            // Add label to map initially
+            map.addLayer(label);
           }
           
           // Add click handler to switch main county
