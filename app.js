@@ -181,17 +181,43 @@ function getBestLabelPosition(layer, countyId) {
     [viewNorth - heightBuffer, viewEast - widthBuffer]
   ];
 
-  // Find the first position that's actually inside the polygon
+  // If user location is present, avoid placing label too close to it
+  var avoidLocation = null;
+  if (window.userLocation && window.userLocation.lat && window.userLocation.lng) {
+    avoidLocation = L.latLng(window.userLocation.lat, window.userLocation.lng);
+  }
+  var minDistanceMeters = 40; // Minimum distance from location marker (tweak as needed)
+  var isMobile = window.innerWidth <= 768;
+
+  // Find the first position that's actually inside the polygon and not too close to location marker
   for (var i = 0; i < candidatePositions.length; i++) {
     var pos = candidatePositions[i];
     var latLng = L.latLng(pos[0], pos[1]);
     if (pointInPolygon(latLng, layer)) {
+      // Avoid overlap with location marker
+      if (avoidLocation && latLng.distanceTo(avoidLocation) < minDistanceMeters) continue;
+      // On mobile, ensure label is within map bounds
+      if (isMobile && !mapBounds.contains(latLng)) continue;
       return latLng;
     }
   }
 
-  // If none of the candidate positions work, fall back to county center
-  return countyBounds.getCenter();
+  // If none of the candidate positions work, fall back to center of visible area (but still avoid location marker)
+  var fallback = L.latLng(midLat, midLng);
+  if (pointInPolygon(fallback, layer) && (!avoidLocation || fallback.distanceTo(avoidLocation) >= minDistanceMeters)) {
+    if (!isMobile || mapBounds.contains(fallback)) {
+      return fallback;
+    }
+  }
+  // Last resort: county center
+  var countyCenter = countyBounds.getCenter();
+  if (!avoidLocation || countyCenter.distanceTo(avoidLocation) >= minDistanceMeters) {
+    if (!isMobile || mapBounds.contains(countyCenter)) {
+      return countyCenter;
+    }
+  }
+  // If all else fails, return null (no safe position)
+  return null;
 }
 
 // Estimate the visible area ratio of a polygon in the current map view
