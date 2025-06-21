@@ -38,7 +38,7 @@ var currentMainCountyId = null; // Track which county is currently highlighted
 var allCountiesData = null; // Store all county data for switching
 var stateInfo = null; // Store state info
 var userLocation = null; // Store user's location for label positioning
-var countyLabels = []; // Track all county labels for repositioning
+var countyLabels = []; // Track all county label for repositioning
 var countyFeatureLayers = []; // Store references to individual county feature layers
 
 function updateStatus(message) {
@@ -142,82 +142,77 @@ function getBestLabelPosition(layer, countyId) {
   var countyBounds = layer.getBounds();
   var mapBounds = map.getBounds();
 
-  // Get the intersection of county and current map view
+  // 1. Only show labels for counties where the majority of the polygon is visible
+  if (getVisibleAreaRatio(layer) <= 0.5) return null;
+
+  // 2. Never overlap the location marker
+  var avoidLocation = null;
+  if (window.userLocation && window.userLocation.lat && window.userLocation.lng) {
+    avoidLocation = L.latLng(window.userLocation.lat, window.userLocation.lng);
+  }
+  var minDistanceMeters = 60;
+  var isMobile = window.innerWidth <= 768;
+
+  // 3. Always place the label inside the visible part of the polygon
+  var countyBounds = layer.getBounds();
   var viewSouth = Math.max(countyBounds.getSouth(), mapBounds.getSouth());
   var viewNorth = Math.min(countyBounds.getNorth(), mapBounds.getNorth());
   var viewWest = Math.max(countyBounds.getWest(), mapBounds.getWest());
   var viewEast = Math.min(countyBounds.getEast(), mapBounds.getEast());
+  if (viewSouth >= viewNorth || viewWest >= viewEast) return null;
 
-  // If county not visible in current view, return null (don't show label)
-  if (viewSouth >= viewNorth || viewWest >= viewEast) {
-    return null;
-  }
-
-  // Calculate 10% inward from the visible borders
-  var heightBuffer = (viewNorth - viewSouth) * 0.10;
-  var widthBuffer = (viewEast - viewWest) * 0.10;
-
-  // Prefer positions closer to the map center, but still within the 10% zone
+  // 4. Gravitate the label as close as possible to the center of the page (map view), both vertically and horizontally
   var mapCenter = map.getCenter();
   var centerLat = mapCenter.lat;
   var centerLng = mapCenter.lng;
   var midLat = (viewSouth + viewNorth) / 2;
   var midLng = (viewWest + viewEast) / 2;
+  var step = Math.max((viewNorth - viewSouth), (viewEast - viewWest)) / 60;
+  var maxRadius = Math.max((viewNorth - viewSouth), (viewEast - viewWest)) / 2;
+  var center = L.latLng(centerLat, centerLng);
 
-  // Determine vertical direction: if map center is above visible area center, gravitate label to top 10%; else to bottom 10%
-  var verticalLat = (centerLat < midLat) ? (viewNorth - heightBuffer) : (viewSouth + heightBuffer);
-  // Always horizontally center in visible area
-  var horizontalLng = Math.max(viewWest + widthBuffer, Math.min(centerLng, viewEast - widthBuffer));
-
-  // Candidate: quadrant-based position
-  var candidatePositions = [
-    [verticalLat, horizontalLng],
-    // Fallbacks: center of visible area, corners, etc.
-    [midLat, horizontalLng],
-    [verticalLat, midLng],
-    [midLat, midLng],
-    [viewSouth + heightBuffer, viewWest + widthBuffer],
-    [viewSouth + heightBuffer, viewEast - widthBuffer],
-    [viewNorth - heightBuffer, viewWest + widthBuffer],
-    [viewNorth - heightBuffer, viewEast - widthBuffer]
-  ];
-
-  // If user location is present, avoid placing label too close to it
-  var avoidLocation = null;
-  if (window.userLocation && window.userLocation.lat && window.userLocation.lng) {
-    avoidLocation = L.latLng(window.userLocation.lat, window.userLocation.lng);
+  // 5. If the map center is not valid, search along the vertical center line for the closest valid point
+  if (mapBounds.contains(center) && pointInPolygon(center, layer) && (!avoidLocation || center.distanceTo(avoidLocation) >= minDistanceMeters)) {
+    return center;
   }
-  var minDistanceMeters = 40; // Minimum distance from location marker (tweak as needed)
-  var isMobile = window.innerWidth <= 768;
-
-  // Find the first position that's actually inside the polygon and not too close to location marker
-  for (var i = 0; i < candidatePositions.length; i++) {
-    var pos = candidatePositions[i];
-    var latLng = L.latLng(pos[0], pos[1]);
-    if (pointInPolygon(latLng, layer)) {
-      // Avoid overlap with location marker
-      if (avoidLocation && latLng.distanceTo(avoidLocation) < minDistanceMeters) continue;
-      // On mobile, ensure label is within map bounds
-      if (isMobile && !mapBounds.contains(latLng)) continue;
-      return latLng;
+  var foundVertical = null;
+  var minVertDist = Infinity;
+  for (var lat = viewSouth; lat <= viewNorth; lat += step) {
+    var candidate = L.latLng(lat, centerLng);
+    if (!mapBounds.contains(candidate)) continue;
+    if (!pointInPolygon(candidate, layer)) continue;
+    if (avoidLocation && candidate.distanceTo(avoidLocation) < minDistanceMeters) continue;
+    var dist = Math.abs(lat - centerLat);
+    if (dist < minVertDist) {
+      foundVertical = candidate;
+      minVertDist = dist;
     }
   }
+  if (foundVertical) return foundVertical;
 
-  // If none of the candidate positions work, fall back to center of visible area (but still avoid location marker)
-  var fallback = L.latLng(midLat, midLng);
-  if (pointInPolygon(fallback, layer) && (!avoidLocation || fallback.distanceTo(avoidLocation) >= minDistanceMeters)) {
-    if (!isMobile || mapBounds.contains(fallback)) {
-      return fallback;
+  // 6. If still not possible, spiral out from the map center to find the closest valid point
+  var bestLatLng = null;
+  var minDist = Infinity;
+  for (var r = 0; r <= maxRadius; r += step) {
+    for (var angle = 0; angle < 360; angle += 8) {
+      var rad = angle * Math.PI / 180;
+      var lat = centerLat + r * Math.cos(rad);
+      var lng = centerLng + r * Math.sin(rad);
+      var candidate = L.latLng(lat, lng);
+      if (!mapBounds.contains(candidate)) continue;
+      if (!pointInPolygon(candidate, layer)) continue;
+      if (avoidLocation && candidate.distanceTo(avoidLocation) < minDistanceMeters) continue;
+      var dist = candidate.distanceTo(center);
+      if (dist < minDist) {
+        bestLatLng = candidate;
+        minDist = dist;
+      }
     }
+    if (bestLatLng) break;
   }
-  // Last resort: county center
-  var countyCenter = countyBounds.getCenter();
-  if (!avoidLocation || countyCenter.distanceTo(avoidLocation) >= minDistanceMeters) {
-    if (!isMobile || mapBounds.contains(countyCenter)) {
-      return countyCenter;
-    }
-  }
-  // If all else fails, return null (no safe position)
+  if (bestLatLng) return bestLatLng;
+
+  // 7. If no valid position is found, do not show the label
   return null;
 }
 
