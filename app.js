@@ -23,6 +23,9 @@ baseLayers['CartoDB Light'].addTo(map);
 // County boundary layer group
 var countyBoundaryGroup = L.layerGroup();
 
+// Add Counties layer to map by default
+countyBoundaryGroup.addTo(map);
+
 // Layer control - visible by default
 L.control.layers(baseLayers, {
   'Counties': countyBoundaryGroup
@@ -36,6 +39,7 @@ var allCountiesData = null; // Store all county data for switching
 var stateInfo = null; // Store state info
 var userLocation = null; // Store user's location for label positioning
 var countyLabels = []; // Track all county labels for repositioning
+var countyFeatureLayers = []; // Store references to individual county feature layers
 
 function updateStatus(message) {
   statusDiv.textContent = message;
@@ -43,93 +47,75 @@ function updateStatus(message) {
 
 // Update all county label positions when map moves
 function updateCountyLabelPositions() {
-  if (!countyBoundaryGroup) {
-    console.log('updateCountyLabelPositions: No county group');
+  if (!countyFeatureLayers || countyFeatureLayers.length === 0) {
     return;
   }
   
-  console.log('updateCountyLabelPositions: Recalculating all label positions');
-  
-  // Remove all existing labels from map
+  // Remove ALL existing labels
   countyLabels.forEach(function(label) {
     if (map.hasLayer(label)) {
       map.removeLayer(label);
     }
   });
-  
-  // Clear the labels array
   countyLabels = [];
   
-  // Recreate labels with new positions
-  countyBoundaryGroup.eachLayer(function(layer) {
-    if (layer.feature && layer.feature.properties && layer.feature.properties.tags) {
-      var countyName = layer.feature.properties.tags.name || 'Unknown County';
+  // Get current map bounds
+  var mapBounds = map.getBounds();
+  
+  // Create labels for visible counties
+  countyFeatureLayers.forEach(function(featureLayer) {
+    if (featureLayer.labelTemplate) {
+      var countyName = featureLayer.labelTemplate.countyName;
+      var countyId = featureLayer.labelTemplate.countyId;
+      var countyBounds = featureLayer.getBounds();
       
-      // Check if county is currently visible on the map
-      var bounds = map.getBounds();
-      var countyBounds = layer.getBounds();
-      
-      // Only create label if county is visible or partially visible
-      if (bounds.intersects(countyBounds)) {
-        console.log('Creating label for visible county:', countyName);
+      // Only create label if county is visible
+      if (mapBounds.intersects(countyBounds)) {
+        var labelPosition = getBestLabelPosition(featureLayer, countyId);
         
-        // Calculate new position
-        var newPosition = getBestLabelPosition(layer, layer.feature.properties.id);
+        // Skip if getBestLabelPosition returned null (county not visible in current view)
+        if (!labelPosition) {
+          return;
+        }
         
-        var isMainCounty = layer.feature.properties.id === currentMainCountyId;
+        var isMainCounty = countyId === currentMainCountyId;
+        
         var labelStyle = isMainCounty ? 
           'background: rgba(138, 43, 226, 0.95); color: white; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: bold; text-align: center; border: 2px solid #8A2BE2; box-shadow: 0 3px 6px rgba(0,0,0,0.4); cursor: pointer;' :
           'background: rgba(255,255,255,0.95); color: #333; padding: 3px 8px; border-radius: 5px; font-size: 12px; font-weight: bold; text-align: center; border: 1px solid #666; box-shadow: 0 2px 4px rgba(0,0,0,0.3); cursor: pointer;';
         
-        // Check if label already exists, if so remove it first
-        if (layer.currentLabel && map.hasLayer(layer.currentLabel)) {
-          map.removeLayer(layer.currentLabel);
-        }
-        
-        var label = L.marker(newPosition, {
+        var label = L.marker(labelPosition, {
           icon: L.divIcon({
             className: 'county-label',
-            html: `<div style="${labelStyle}">${countyName}</div>`,
+            html: `<div style="${labelStyle}" data-county="${countyId}">${countyName}</div>`,
             iconSize: [130, 26],
             iconAnchor: [65, 13]
           })
         });
         
-        // Make labels clickable for county switching
+        // Store county information on the label for debugging
+        label._countyId = countyId;
+        label._countyName = countyName;
+        
+        // Make clickable
         label.on('click', function(e) {
-          console.log('Label clicked for county:', countyName, 'ID:', layer.feature.properties.id);
           e.originalEvent.stopPropagation();
-          switchMainCounty(layer.feature.properties.id);
+          switchMainCounty(countyId);
         });
         
-        // Add to map and tracking
         map.addLayer(label);
         countyLabels.push(label);
-        
-        // Store reference on the layer for easy access
-        layer.currentLabel = label;
-      } else {
-        console.log('County', countyName, 'is out of view, not creating label');
-        
-        // Remove label if county is out of view
-        if (layer.currentLabel && map.hasLayer(layer.currentLabel)) {
-          map.removeLayer(layer.currentLabel);
-        }
       }
     }
   });
-  
-  console.log('Created', countyLabels.length, 'labels');
 }
 
-// Add map event listeners for label repositioning
+// Add map event listeners for immediate label repositioning
 map.on('moveend', function() {
-  console.log('moveend event triggered');
   updateCountyLabelPositions();
 });
 
 map.on('zoomend', function() {
-  console.log('zoomend event triggered');
   updateCountyLabelPositions();
 });
 
@@ -144,119 +130,122 @@ function getCountyStyle(isMainCounty) {
   };
 }
 
-// Find the best position for county label with "magnetic" attraction to user location
+// Place label within 15% of border, close to current map view, only if visible
 function getBestLabelPosition(layer, countyId) {
-  if (!userLocation) {
-    // Fallback to center if no user location
-    return layer.getBounds().getCenter();
+  var countyBounds = layer.getBounds();
+  var mapBounds = map.getBounds();
+  
+  // Get the intersection of county and current map view
+  var viewSouth = Math.max(countyBounds.getSouth(), mapBounds.getSouth());
+  var viewNorth = Math.min(countyBounds.getNorth(), mapBounds.getNorth());
+  var viewWest = Math.max(countyBounds.getWest(), mapBounds.getWest());
+  var viewEast = Math.min(countyBounds.getEast(), mapBounds.getEast());
+  
+  // If county not visible in current view, return null (don't show label)
+  if (viewSouth >= viewNorth || viewWest >= viewEast) {
+    return null;
   }
   
-  var isMainCounty = countyId === currentMainCountyId;
-  var userLatLng = L.latLng(userLocation.lat, userLocation.lng);
-  var bounds = layer.getBounds();
-  var center = bounds.getCenter();
+  // Calculate 5% inward from the visible borders
+  var heightBuffer = (viewNorth - viewSouth) * 0.05;
+  var widthBuffer = (viewEast - viewWest) * 0.05;
   
-  // For main county, place label very close to user location
-  if (isMainCounty) {
-    // Check if user location is inside the county bounds
-    if (bounds.contains(userLatLng)) {
-      // User is inside - place label close but offset to avoid marker overlap
-      var offsetDistance = 0.01; // ~1km
-      var offsetLat = userLocation.lat + offsetDistance;
-      var offsetLng = userLocation.lng + offsetDistance * 0.7;
-      var offsetPosition = L.latLng(offsetLat, offsetLng);
-      
-      // If offset is still in bounds, use it, otherwise try other directions
-      if (bounds.contains(offsetPosition)) {
-        return offsetPosition;
-      } else {
-        // Try different offsets
-        var alternatives = [
-          L.latLng(userLocation.lat - offsetDistance, userLocation.lng + offsetDistance * 0.7),  // south-east
-          L.latLng(userLocation.lat + offsetDistance, userLocation.lng - offsetDistance * 0.7),  // north-west
-          L.latLng(userLocation.lat - offsetDistance, userLocation.lng - offsetDistance * 0.7),  // south-west
-          L.latLng(userLocation.lat, userLocation.lng + offsetDistance * 1.5),                   // east
-          L.latLng(userLocation.lat, userLocation.lng - offsetDistance * 1.5),                   // west
-          L.latLng(userLocation.lat + offsetDistance * 1.5, userLocation.lng),                   // north
-          L.latLng(userLocation.lat - offsetDistance * 1.5, userLocation.lng)                    // south
-        ];
-        
-        for (var i = 0; i < alternatives.length; i++) {
-          if (bounds.contains(alternatives[i])) {
-            return alternatives[i];
+  // Try multiple positions within the 5% border zone
+  var candidatePositions = [
+    // Southwest corner of 5% zone
+    [viewSouth + heightBuffer, viewWest + widthBuffer],
+    // Southeast corner of 5% zone  
+    [viewSouth + heightBuffer, viewEast - widthBuffer],
+    // Northwest corner of 5% zone
+    [viewNorth - heightBuffer, viewWest + widthBuffer],
+    // Northeast corner of 5% zone
+    [viewNorth - heightBuffer, viewEast - widthBuffer],
+    // Center of visible area
+    [(viewSouth + viewNorth) / 2, (viewWest + viewEast) / 2]
+  ];
+  
+  // Find the first position that's actually inside the polygon
+  for (var i = 0; i < candidatePositions.length; i++) {
+    var pos = candidatePositions[i];
+    var latLng = L.latLng(pos[0], pos[1]);
+    
+    if (pointInPolygon(latLng, layer)) {
+      return latLng;
+    }
+  }
+  
+  // If none of the candidate positions work, fall back to county center
+  return countyBounds.getCenter();
+}
+
+// Check if a point is inside a polygon using ray casting algorithm
+function pointInPolygon(latLng, layer) {
+  if (!latLng || !layer) return false;
+  
+  var lat = latLng.lat;
+  var lng = latLng.lng;
+  
+  // Handle different layer types
+  var coordinates = null;
+  
+  if (layer.feature && layer.feature.geometry) {
+    var geom = layer.feature.geometry;
+    if (geom.type === 'Polygon') {
+      coordinates = geom.coordinates[0]; // Use outer ring
+    } else if (geom.type === 'MultiPolygon') {
+      // For MultiPolygon, check all polygons
+      for (var p = 0; p < geom.coordinates.length; p++) {
+        coordinates = geom.coordinates[p][0]; // Use outer ring of each polygon
+        if (pointInPolygonCoords(lat, lng, coordinates)) {
+          return true;
+        }
+      }
+      return false;
+    }
+  } else if (layer.getLatLngs) {
+    // Try to get coordinates from Leaflet layer
+    var latlngs = layer.getLatLngs();
+    if (latlngs && latlngs.length > 0) {
+      // Handle nested arrays (Polygon vs MultiPolygon)
+      if (Array.isArray(latlngs[0]) && Array.isArray(latlngs[0][0])) {
+        // MultiPolygon case
+        for (var p = 0; p < latlngs.length; p++) {
+          coordinates = latlngs[p][0].map(function(ll) { return [ll.lng, ll.lat]; });
+          if (pointInPolygonCoords(lat, lng, coordinates)) {
+            return true;
           }
         }
-        
-        // If all offsets are outside bounds, use a small offset from user location
-        return L.latLng(userLocation.lat + offsetDistance * 0.3, userLocation.lng + offsetDistance * 0.3);
+        return false;
+      } else if (Array.isArray(latlngs[0])) {
+        // Polygon case
+        coordinates = latlngs[0].map(function(ll) { return [ll.lng, ll.lat]; });
       }
     }
   }
   
-  // For adjacent counties, place label inside county bounds but close to border near user
-  try {
-    var geometry = layer.feature.geometry;
-    if (geometry && geometry.coordinates) {
-      var closestPoint = null;
-      var minDistance = Infinity;
-      
-      // Sample points along the county boundary to find closest to user
-      var coords = geometry.coordinates[0]; // First ring
-      var step = Math.max(1, Math.floor(coords.length / 50)); // Dense sampling
-      
-      for (var i = 0; i < coords.length; i += step) {
-        var point = L.latLng(coords[i][1], coords[i][0]);
-        var distance = userLatLng.distanceTo(point);
-        if (distance < minDistance) {
-          minDistance = distance;
-          closestPoint = point;
-        }
-      }
-      
-      if (closestPoint) {
-        // Move inward from the closest boundary point toward county center
-        // This ensures the label stays inside the county
-        var inwardDistance = 0.020; // ~2km inward from boundary
-        var directionToCenter = {
-          lat: center.lat - closestPoint.lat,
-          lng: center.lng - closestPoint.lng
-        };
-        
-        // Normalize direction
-        var magnitude = Math.sqrt(directionToCenter.lat * directionToCenter.lat + directionToCenter.lng * directionToCenter.lng);
-        if (magnitude > 0) {
-          directionToCenter.lat /= magnitude;
-          directionToCenter.lng /= magnitude;
-          
-          // Move inward from closest point
-          var inwardLat = closestPoint.lat + directionToCenter.lat * inwardDistance;
-          var inwardLng = closestPoint.lng + directionToCenter.lng * inwardDistance;
-          var inwardPosition = L.latLng(inwardLat, inwardLng);
-          
-          // If inward position is still in bounds, use it
-          if (bounds.contains(inwardPosition)) {
-            return inwardPosition;
-          }
-        }
-        
-        // Fallback: move from boundary toward center by a larger amount
-        var safeLat = closestPoint.lat + (center.lat - closestPoint.lat) * 0.25;
-        var safeLng = closestPoint.lng + (center.lng - closestPoint.lng) * 0.25;
-        var safePosition = L.latLng(safeLat, safeLng);
-        
-        if (bounds.contains(safePosition)) {
-          return safePosition;
-        }
-      }
+  if (!coordinates) return false;
+  
+  return pointInPolygonCoords(lat, lng, coordinates);
+}
+
+// Ray casting algorithm for point-in-polygon test
+function pointInPolygonCoords(lat, lng, coordinates) {
+  var inside = false;
+  var j = coordinates.length - 1;
+  
+  for (var i = 0; i < coordinates.length; i++) {
+    var xi = coordinates[i][1]; // lat
+    var yi = coordinates[i][0]; // lng
+    var xj = coordinates[j][1]; // lat
+    var yj = coordinates[j][0]; // lng
+    
+    if (((yi > lng) !== (yj > lng)) && (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi)) {
+      inside = !inside;
     }
-  } catch (error) {
-    console.warn('Error calculating boundary-aware label position:', error);
+    j = i;
   }
   
-  // Final fallback - move center toward user location
-  var centerToUserLat = center.lat + (userLocation.lat - center.lat) * 0.4;
-  var centerToUserLng = center.lng + (userLocation.lng - center.lng) * 0.4;
-  return L.latLng(centerToUserLat, centerToUserLng);
+  return inside;
 }
 
 // Switch the main county highlight
@@ -332,6 +321,15 @@ map.on('overlayremove', function(e) {
 function loadCountyAtCenter() {
   if (!countyBoundaryLoaded) {
     updateStatus("Finding county at map center...");
+    
+    // Clear previous county data
+    countyFeatureLayers = [];
+    countyLabels.forEach(function(label) {
+      if (map.hasLayer(label)) {
+        map.removeLayer(label);
+      }
+    });
+    countyLabels = [];
     
     var center = map.getCenter();
     var lat = center.lat;
@@ -471,6 +469,8 @@ function loadCountyAtCenter() {
         return;
       }
       
+      console.log('Creating GeoJSON layer with', geojsonData.features.length, 'features');
+      
       var layer = L.geoJSON(geojsonData, {
         style: function(feature) {
           var isMainCounty = feature.properties.id === currentMainCountyId;
@@ -489,36 +489,21 @@ function loadCountyAtCenter() {
             var tags = feature.properties.tags;
             var countyName = tags.name || 'Unknown County';
             
-            // Calculate label position inside county bounds but close to border near user
-            var labelPosition = getBestLabelPosition(layer, feature.properties.id);
+            console.log('Creating labelTemplate for county:', countyName, 'ID:', feature.properties.id);
             
-            var isMainCounty = feature.properties.id === currentMainCountyId;
-            var labelStyle = isMainCounty ? 
-              'background: rgba(138, 43, 226, 0.95); color: white; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: bold; text-align: center; border: 2px solid #8A2BE2; box-shadow: 0 3px 6px rgba(0,0,0,0.4); cursor: pointer;' :
-              'background: rgba(255,255,255,0.95); color: #333; padding: 3px 8px; border-radius: 5px; font-size: 12px; font-weight: bold; text-align: center; border: 1px solid #666; box-shadow: 0 2px 4px rgba(0,0,0,0.3); cursor: pointer;';
+            // Store label reference but don't add to map yet
+            // Labels will be managed by updateCountyLabelPositions
+            layer.labelTemplate = {
+              countyName: countyName,
+              countyId: feature.properties.id
+            };
             
-            var label = L.marker(labelPosition, {
-              icon: L.divIcon({
-                className: 'county-label',
-                html: `<div style="${labelStyle}">${countyName}</div>`,
-                iconSize: [130, 26],
-                iconAnchor: [65, 13]
-              })
-            });
+            // Store reference to this feature layer for easy access during repositioning
+            countyFeatureLayers.push(layer);
             
-            // Don't add to map initially - will be managed by updateCountyLabelPositions
-            
-            // Make labels clickable for county switching
-            label.on('click', function(e) {
-              console.log('Label clicked for county:', countyName, 'ID:', feature.properties.id);
-              e.originalEvent.stopPropagation();
-              switchMainCounty(feature.properties.id);
-            });
-            
-            // Store label reference and add to map initially
-            layer.label = label;
-            map.addLayer(label);
-            countyLabels.push(label);
+            console.log('labelTemplate created and layer stored:', layer.labelTemplate);
+          } else {
+            console.log('No feature properties or tags found for layer');
           }
           
           // Add click handler to switch main county
@@ -558,14 +543,20 @@ function loadCountyAtCenter() {
         }
       });
       
+      console.log('GeoJSON layer created, adding to countyBoundaryGroup');
       countyBoundaryGroup.addLayer(layer);
+      console.log('Layer added. Group now has layers:', countyBoundaryGroup.getLayers().length);
       countyBoundaryLoaded = true;
       
       // Show initial main county and state in status
       updateStatus(`${result.selectedCounties.length} counties loaded`);
       
       // Initialize label positions after counties are loaded
-      setTimeout(updateCountyLabelPositions, 100);
+      console.log('Counties loaded, calling updateCountyLabelPositions in 500ms to ensure everything is ready...');
+      setTimeout(function() {
+        console.log('Timer fired, calling updateCountyLabelPositions now');
+        updateCountyLabelPositions();
+      }, 500);
     })
     .catch(err => {
       console.error('Error loading county boundary:', err);
@@ -615,12 +606,12 @@ function autoLocate() {
         fillOpacity: 0.8
       }).addTo(map).bindPopup("Your location");
       
-      updateStatus("Location found! Toggle county boundary in layer control.");
+      updateStatus("Location found! Loading nearby counties...");
       
-      // Auto-enable county boundary
+      // Auto-load counties after location is found
       setTimeout(() => {
-        if (!map.hasLayer(countyBoundaryGroup)) {
-          map.addLayer(countyBoundaryGroup);
+        if (!countyBoundaryLoaded) {
+          loadCountyAtCenter();
         }
       }, 1000);
       
