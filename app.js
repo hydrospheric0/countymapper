@@ -81,6 +81,11 @@ function updateCountyLabelPositions() {
           'background: rgba(138, 43, 226, 0.95); color: white; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: bold; text-align: center; border: 2px solid #8A2BE2; box-shadow: 0 3px 6px rgba(0,0,0,0.4); cursor: pointer;' :
           'background: rgba(255,255,255,0.95); color: #333; padding: 3px 8px; border-radius: 5px; font-size: 12px; font-weight: bold; text-align: center; border: 1px solid #666; box-shadow: 0 2px 4px rgba(0,0,0,0.3); cursor: pointer;';
         
+        // Check if label already exists, if so remove it first
+        if (layer.currentLabel && map.hasLayer(layer.currentLabel)) {
+          map.removeLayer(layer.currentLabel);
+        }
+        
         var label = L.marker(newPosition, {
           icon: L.divIcon({
             className: 'county-label',
@@ -105,6 +110,11 @@ function updateCountyLabelPositions() {
         layer.currentLabel = label;
       } else {
         console.log('County', countyName, 'is out of view, not creating label');
+        
+        // Remove label if county is out of view
+        if (layer.currentLabel && map.hasLayer(layer.currentLabel)) {
+          map.removeLayer(layer.currentLabel);
+        }
       }
     }
   });
@@ -505,8 +515,10 @@ function loadCountyAtCenter() {
               switchMainCounty(feature.properties.id);
             });
             
-            // Store label reference (will be managed by updateCountyLabelPositions)
-            layer.initialLabel = label;
+            // Store label reference and add to map initially
+            layer.label = label;
+            map.addLayer(label);
+            countyLabels.push(label);
           }
           
           // Add click handler to switch main county
