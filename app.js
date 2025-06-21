@@ -161,47 +161,42 @@ function getBestLabelPosition(layer, countyId) {
   var viewEast = Math.min(countyBounds.getEast(), mapBounds.getEast());
   if (viewSouth >= viewNorth || viewWest >= viewEast) return null;
 
-  // 4. Gravitate the label as close as possible to the center of the page (map view), both vertically and horizontally
+  // 4. Calculate minimum boundary distance (20% of visible bbox to avoid overlap with outline)
+  var minBoundaryDistMeters = Math.min(
+    map.distance([viewSouth, viewWest], [viewNorth, viewWest]),
+    map.distance([viewSouth, viewWest], [viewSouth, viewEast])
+  ) * 0.20;
+
+  // 5. Spiral search from map center: evaluate all rules point by point
   var mapCenter = map.getCenter();
   var centerLat = mapCenter.lat;
   var centerLng = mapCenter.lng;
-  var midLat = (viewSouth + viewNorth) / 2;
-  var midLng = (viewWest + viewEast) / 2;
-  var step = Math.max((viewNorth - viewSouth), (viewEast - viewWest)) / 60;
+  var step = Math.max((viewNorth - viewSouth), (viewEast - viewWest)) / 80;
   var maxRadius = Math.max((viewNorth - viewSouth), (viewEast - viewWest)) / 2;
   var center = L.latLng(centerLat, centerLng);
-
-  // 5. If the map center is not valid, search along the vertical center line for the closest valid point
-  if (mapBounds.contains(center) && pointInPolygon(center, layer) && (!avoidLocation || center.distanceTo(avoidLocation) >= minDistanceMeters)) {
-    return center;
-  }
-  var foundVertical = null;
-  var minVertDist = Infinity;
-  for (var lat = viewSouth; lat <= viewNorth; lat += step) {
-    var candidate = L.latLng(lat, centerLng);
-    if (!mapBounds.contains(candidate)) continue;
-    if (!pointInPolygon(candidate, layer)) continue;
-    if (avoidLocation && candidate.distanceTo(avoidLocation) < minDistanceMeters) continue;
-    var dist = Math.abs(lat - centerLat);
-    if (dist < minVertDist) {
-      foundVertical = candidate;
-      minVertDist = dist;
-    }
-  }
-  if (foundVertical) return foundVertical;
-
-  // 6. If still not possible, spiral out from the map center to find the closest valid point
   var bestLatLng = null;
   var minDist = Infinity;
+
   for (var r = 0; r <= maxRadius; r += step) {
-    for (var angle = 0; angle < 360; angle += 8) {
+    for (var angle = 0; angle < 360; angle += 6) {
       var rad = angle * Math.PI / 180;
       var lat = centerLat + r * Math.cos(rad);
       var lng = centerLng + r * Math.sin(rad);
       var candidate = L.latLng(lat, lng);
+      
+      // Rule A: Must be within map bounds
       if (!mapBounds.contains(candidate)) continue;
+      
+      // Rule B: Must be inside polygon
       if (!pointInPolygon(candidate, layer)) continue;
+      
+      // Rule C: Must not overlap location marker
       if (avoidLocation && candidate.distanceTo(avoidLocation) < minDistanceMeters) continue;
+      
+      // Rule D: Must be at least minBoundaryDistMeters from polygon outline
+      if (minDistanceToPolygonBoundary(candidate, layer) < minBoundaryDistMeters) continue;
+      
+      // Rule E: Choose closest to map center
       var dist = candidate.distanceTo(center);
       if (dist < minDist) {
         bestLatLng = candidate;
@@ -212,7 +207,7 @@ function getBestLabelPosition(layer, countyId) {
   }
   if (bestLatLng) return bestLatLng;
 
-  // 7. If no valid position is found, do not show the label
+  // 6. If no valid position is found, do not show the label
   return null;
 }
 
@@ -871,3 +866,41 @@ window.addEventListener('resize', function() {
 window.addEventListener('load', function() {
   setTimeout(autoLocate, 500);
 });
+
+// Helper: compute minimum distance from a point to polygon boundary (in meters)
+function minDistanceToPolygonBoundary(latlng, layer) {
+  var minDist = Infinity;
+  var coords = null;
+  
+  if (layer.feature && layer.feature.geometry) {
+    var geom = layer.feature.geometry;
+    if (geom.type === 'Polygon') {
+      coords = geom.coordinates[0];
+    } else if (geom.type === 'MultiPolygon') {
+      coords = geom.coordinates[0][0];
+    }
+    if (coords) {
+      for (var i = 0; i < coords.length - 1; i++) {
+        var p1 = L.latLng(coords[i][1], coords[i][0]);
+        var p2 = L.latLng(coords[i+1][1], coords[i+1][0]);
+        var dist = map.distance(latlng, p1);
+        if (dist < minDist) minDist = dist;
+        dist = map.distance(latlng, p2);
+        if (dist < minDist) minDist = dist;
+      }
+    }
+  } else if (layer.getLatLngs) {
+    var latlngs = layer.getLatLngs();
+    if (latlngs && latlngs.length > 0) {
+      var arr = Array.isArray(latlngs[0][0]) ? latlngs[0][0] : latlngs[0];
+      for (var i = 0; i < arr.length - 1; i++) {
+        var p1 = arr[i], p2 = arr[i+1];
+        var dist = map.distance(latlng, p1);
+        if (dist < minDist) minDist = dist;
+        dist = map.distance(latlng, p2);
+        if (dist < minDist) minDist = dist;
+      }
+    }
+  }
+  return minDist;
+}
