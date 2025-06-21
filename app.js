@@ -47,11 +47,15 @@ function updateStatus(message) {
 
 // Update all county label positions when map moves
 function updateCountyLabelPositions() {
+  console.log('updateCountyLabelPositions called, countyFeatureLayers:', countyFeatureLayers ? countyFeatureLayers.length : 'undefined');
+  
   if (!countyFeatureLayers || countyFeatureLayers.length === 0) {
+    console.log('No county feature layers, returning');
     return;
   }
   
   // Remove ALL existing labels
+  console.log('Removing', countyLabels.length, 'existing labels');
   countyLabels.forEach(function(label) {
     if (map.hasLayer(label)) {
       map.removeLayer(label);
@@ -106,17 +110,31 @@ function updateCountyLabelPositions() {
         label._countyId = countyId;
         label._countyName = countyName;
         
-        // Make clickable
+        // Make clickable with improved mobile support
         label.on('click', function(e) {
-          e.originalEvent.stopPropagation();
+          if (e.originalEvent) {
+            e.originalEvent.stopPropagation();
+            e.originalEvent.preventDefault();
+          }
+          console.log('Label clicked for county:', countyName);
           switchMainCounty(countyId);
+        });
+        
+        // Prevent map interaction on label touch/click
+        label.on('mousedown touchstart', function(e) {
+          if (e.originalEvent) {
+            e.originalEvent.stopPropagation();
+          }
         });
         
         map.addLayer(label);
         countyLabels.push(label);
+        console.log('Created label for', countyName, 'at position', labelPosition);
       }
     }
   });
+  
+  console.log('Finished updating labels, total labels created:', countyLabels.length);
 }
 
 // Add map event listeners for immediate label repositioning
