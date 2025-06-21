@@ -22,14 +22,30 @@ baseLayers['CartoDB Light'].addTo(map);
 
 // County boundary layer group
 var countyBoundaryGroup = L.layerGroup();
+var countyLabelsGroup = L.layerGroup();
 
-// Add Counties layer to map by default
+// Add both layers to map by default
 countyBoundaryGroup.addTo(map);
+countyLabelsGroup.addTo(map);
 
 // Layer control - visible by default
-L.control.layers(baseLayers, {
-  'Counties': countyBoundaryGroup
+var layerControl = L.control.layers(baseLayers, {
+  'Outlines': countyBoundaryGroup,
+  'Names': countyLabelsGroup
 }, {collapsed: false}).addTo(map);
+
+// Add event listeners for layer control
+map.on('overlayadd', function(e) {
+  if (e.name === 'Names' && e.layer === countyLabelsGroup) {
+    updateLabels();
+  }
+});
+
+map.on('overlayremove', function(e) {
+  if (e.name === 'Names' && e.layer === countyLabelsGroup) {
+    clearLabels();
+  }
+});
 
 var countyBoundaryLoaded = false;
 var locationMarker = null;
@@ -52,11 +68,7 @@ function updateCountyLabelPositions() {
   }
   
   // Remove ALL existing labels
-  countyLabels.forEach(function(label) {
-    if (map.hasLayer(label)) {
-      map.removeLayer(label);
-    }
-  });
+  countyLabelsGroup.clearLayers();
   countyLabels = [];
   
   // Get current map bounds
@@ -110,7 +122,7 @@ function updateCountyLabelPositions() {
           switchMainCounty(countyId);
         });
         
-        map.addLayer(label);
+        countyLabelsGroup.addLayer(label);
         countyLabels.push(label);
       }
     }
@@ -392,13 +404,28 @@ function switchMainCounty(newMainCountyId) {
     if (selectedCounty) {
       var countyName = selectedCounty.relation.tags.name || 'Unknown County';
       var stateName = stateInfo ? stateInfo.name : 'Unknown State';
-      updateStatus(`${allCountiesData.selectedCounties.length} counties loaded`);
+      
+      // Calculate distance to county border if user location is available
+      var distanceText = getDistanceToBorderText(currentMainCountyId);
+      
+      updateStatus(`${countyName}, ${stateName}${distanceText}`);
       console.log('Status updated for:', countyName, stateName);
     }
   }
   
   // Update label positions after switching main county - this will recreate all labels
   setTimeout(updateCountyLabelPositions, 100);
+}
+
+// Clear all county labels
+function clearLabels() {
+  countyLabelsGroup.clearLayers();
+  countyLabels = [];
+}
+
+// Update/recreate all county labels (alias for updateCountyLabelPositions)
+function updateLabels() {
+  updateCountyLabelPositions();
 }
 
 // Handle county boundary toggle
@@ -657,7 +684,10 @@ function loadCountyAtCenter() {
       countyBoundaryLoaded = true;
       
       // Show initial main county and state in status
-      updateStatus(`${result.selectedCounties.length} counties loaded`);
+      var mainCountyName = result.mainCounty.tags.name || 'Unknown County';
+      var stateName = result.stateInfo ? result.stateInfo.name : 'Unknown State';
+      var distanceText = getDistanceToBorderText(result.mainCounty.id);
+      updateStatus(`${mainCountyName}, ${stateName}${distanceText}`);
       
       // Initialize label positions after counties are loaded
       console.log('Counties loaded, calling updateCountyLabelPositions in 500ms to ensure everything is ready...');
@@ -971,4 +1001,28 @@ function distanceToLineSegment(point, lineStart, lineEnd) {
   }
 
   return map.distance(point, L.latLng(xx, yy));
+}
+
+// Helper function to calculate and format distance to county border
+function getDistanceToBorderText(countyId) {
+  if (!userLocation || !locationMarker) return '';
+  
+  var userLatLng = L.latLng(userLocation.lat, userLocation.lng);
+  var countyLayer = null;
+  
+  // Find the county layer
+  countyBoundaryGroup.eachLayer(function(layer) {
+    if (layer.feature && layer.feature.properties && layer.feature.properties.id === countyId) {
+      countyLayer = layer;
+    }
+  });
+  
+  if (!countyLayer) return '';
+  
+  var distanceToBorder = minDistanceToPolygonBoundary(userLatLng, countyLayer);
+  if (distanceToBorder >= Infinity) return '';
+  
+  var distanceKm = (distanceToBorder / 1000).toFixed(1);
+  var distanceMiles = (distanceToBorder / 1609.34).toFixed(1);
+  return ` • ${distanceKm}km (${distanceMiles}mi) to border`;
 }

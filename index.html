@@ -9,9 +9,29 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     html, body { height: 100%; margin: 0; padding: 0; font-family: Arial, sans-serif; }
+    
+    /* Title bar */
+    #title-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 40px;
+      background: #0f172a;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: bold;
+      z-index: 1002;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
     #map { 
       width: 100vw; 
-      height: 100vh; 
+      height: calc(100vh - 40px);
+      margin-top: 40px;
       /* Ensure attribution area is not covered */
       position: relative;
     }
@@ -99,6 +119,16 @@
     }
     
     @media (max-width: 768px) {
+      #title-bar {
+        height: 35px;
+        font-size: 16px;
+      }
+      
+      #map {
+        height: calc(100vh - 35px);
+        margin-top: 35px;
+      }
+      
       #status {
         left: 5px;
         bottom: 10px;
@@ -119,6 +149,7 @@
   </style>
 </head>
 <body>
+  <div id="title-bar">County Mapper</div>
   <div id="map"></div>
   <div id="status">Loading your location and nearby counties...</div>
   
