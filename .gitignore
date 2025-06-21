@@ -1,0 +1,30 @@
+# County Mapper - GitHub Pages
+# Ignore development files
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Development
+node_modules/
+.env
+.env.local
+
+# Build artifacts (if any)
+dist/
+build/
+
+# Backup files
+*.bak
+*.backup
+*~
