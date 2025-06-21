@@ -89,9 +89,7 @@ function updateCountyLabelPositions() {
         var iconWidth = isSmallMobile ? 150 : (isMobile ? 140 : 130);
         var iconHeight = isSmallMobile ? 32 : (isMobile ? 28 : 26);
         
-        var labelStyle = isMainCounty ? 
-          `background: rgba(138, 43, 226, 0.95); color: white; padding: ${padding}; border-radius: 6px; font-size: ${fontSize}; font-weight: bold; text-align: center; border: 2px solid #8A2BE2; box-shadow: 0 3px 6px rgba(0,0,0,0.4); cursor: pointer;` :
-          `background: rgba(255,255,255,0.95); color: #333; padding: ${padding}; border-radius: 5px; font-size: ${fontSize}; font-weight: bold; text-align: center; border: 1px solid #666; box-shadow: 0 2px 4px rgba(0,0,0,0.3); cursor: pointer;`;
+        var labelStyle = `color: #000; font-size: ${fontSize}; font-weight: bold; text-align: center; padding: ${padding}; background: none; border: none; box-shadow: none;`;
         
         var label = L.marker(labelPosition, {
           icon: L.divIcon({
@@ -166,15 +164,18 @@ function getBestLabelPosition(layer, countyId) {
   var midLat = (viewSouth + viewNorth) / 2;
   var midLng = (viewWest + viewEast) / 2;
 
+  // Determine vertical direction: if map center is above visible area center, gravitate label to top 10%; else to bottom 10%
+  var verticalLat = (centerLat < midLat) ? (viewNorth - heightBuffer) : (viewSouth + heightBuffer);
+  // Always horizontally center in visible area
+  var horizontalLng = Math.max(viewWest + widthBuffer, Math.min(centerLng, viewEast - widthBuffer));
+
+  // Candidate: quadrant-based position
   var candidatePositions = [
-    // Closest to map center within 10% zone
-    [
-      Math.max(viewSouth + heightBuffer, Math.min(centerLat, viewNorth - heightBuffer)),
-      Math.max(viewWest + widthBuffer, Math.min(centerLng, viewEast - widthBuffer))
-    ],
-    // Center of visible area
+    [verticalLat, horizontalLng],
+    // Fallbacks: center of visible area, corners, etc.
+    [midLat, horizontalLng],
+    [verticalLat, midLng],
     [midLat, midLng],
-    // Corners of 10% zone
     [viewSouth + heightBuffer, viewWest + widthBuffer],
     [viewSouth + heightBuffer, viewEast - widthBuffer],
     [viewNorth - heightBuffer, viewWest + widthBuffer],
