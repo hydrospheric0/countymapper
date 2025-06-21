@@ -34,6 +34,26 @@
       transform: scale(1.05);
       filter: brightness(1.1);
     }
+    
+    /* Mobile-specific county label styling */
+    @media (max-width: 768px) {
+      .county-label div {
+        font-size: 14px !important;
+        padding: 5px 12px !important;
+        min-width: 80px;
+        white-space: nowrap;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .county-label div {
+        font-size: 16px !important;
+        padding: 6px 14px !important;
+        min-width: 90px;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.6) !important;
+      }
+    }
     /* Ensure Leaflet attribution is visible on mobile */
     .leaflet-control-attribution {
       background: rgba(255, 255, 255, 0.9) !important;

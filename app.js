@@ -80,16 +80,25 @@ function updateCountyLabelPositions() {
         
         var isMainCounty = countyId === currentMainCountyId;
         
+        // Responsive sizing for mobile devices
+        var isMobile = window.innerWidth <= 768;
+        var isSmallMobile = window.innerWidth <= 480;
+        
+        var fontSize = isSmallMobile ? '16px' : (isMobile ? '14px' : (isMainCounty ? '13px' : '12px'));
+        var padding = isSmallMobile ? '6px 14px' : (isMobile ? '5px 12px' : (isMainCounty ? '4px 10px' : '3px 8px'));
+        var iconWidth = isSmallMobile ? 150 : (isMobile ? 140 : 130);
+        var iconHeight = isSmallMobile ? 32 : (isMobile ? 28 : 26);
+        
         var labelStyle = isMainCounty ? 
-          'background: rgba(138, 43, 226, 0.95); color: white; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: bold; text-align: center; border: 2px solid #8A2BE2; box-shadow: 0 3px 6px rgba(0,0,0,0.4); cursor: pointer;' :
-          'background: rgba(255,255,255,0.95); color: #333; padding: 3px 8px; border-radius: 5px; font-size: 12px; font-weight: bold; text-align: center; border: 1px solid #666; box-shadow: 0 2px 4px rgba(0,0,0,0.3); cursor: pointer;';
+          `background: rgba(138, 43, 226, 0.95); color: white; padding: ${padding}; border-radius: 6px; font-size: ${fontSize}; font-weight: bold; text-align: center; border: 2px solid #8A2BE2; box-shadow: 0 3px 6px rgba(0,0,0,0.4); cursor: pointer;` :
+          `background: rgba(255,255,255,0.95); color: #333; padding: ${padding}; border-radius: 5px; font-size: ${fontSize}; font-weight: bold; text-align: center; border: 1px solid #666; box-shadow: 0 2px 4px rgba(0,0,0,0.3); cursor: pointer;`;
         
         var label = L.marker(labelPosition, {
           icon: L.divIcon({
             className: 'county-label',
             html: `<div style="${labelStyle}" data-county="${countyId}">${countyName}</div>`,
-            iconSize: [130, 26],
-            iconAnchor: [65, 13]
+            iconSize: [iconWidth, iconHeight],
+            iconAnchor: [iconWidth/2, iconHeight/2]
           })
         });
         
@@ -785,6 +794,15 @@ function coordinatesEqual(coord1, coord2) {
   return Math.abs(coord1[0] - coord2[0]) < 0.0000001 && 
          Math.abs(coord1[1] - coord2[1]) < 0.0000001;
 }
+
+// Handle window resize for responsive label sizing
+window.addEventListener('resize', function() {
+  // Debounce resize events
+  clearTimeout(window.resizeTimeout);
+  window.resizeTimeout = setTimeout(function() {
+    updateLabels();
+  }, 250);
+});
 
 // Start auto-location
 window.addEventListener('load', function() {
