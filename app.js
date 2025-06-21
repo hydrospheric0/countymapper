@@ -47,15 +47,11 @@ function updateStatus(message) {
 
 // Update all county label positions when map moves
 function updateCountyLabelPositions() {
-  console.log('updateCountyLabelPositions called, countyFeatureLayers:', countyFeatureLayers ? countyFeatureLayers.length : 'undefined');
-  
   if (!countyFeatureLayers || countyFeatureLayers.length === 0) {
-    console.log('No county feature layers, returning');
     return;
   }
   
   // Remove ALL existing labels
-  console.log('Removing', countyLabels.length, 'existing labels');
   countyLabels.forEach(function(label) {
     if (map.hasLayer(label)) {
       map.removeLayer(label);
@@ -73,8 +69,8 @@ function updateCountyLabelPositions() {
       var countyId = featureLayer.labelTemplate.countyId;
       var countyBounds = featureLayer.getBounds();
       
-      // Only create label if county is visible
-      if (mapBounds.intersects(countyBounds)) {
+      // Only create label if county is visible and majority of area is visible
+      if (mapBounds.intersects(countyBounds) && getVisibleAreaRatio(featureLayer) > 0.5) {
         var labelPosition = getBestLabelPosition(featureLayer, countyId);
         
         // Skip if getBestLabelPosition returned null (county not visible in current view)
@@ -110,31 +106,17 @@ function updateCountyLabelPositions() {
         label._countyId = countyId;
         label._countyName = countyName;
         
-        // Make clickable with improved mobile support
+        // Make clickable
         label.on('click', function(e) {
-          if (e.originalEvent) {
-            e.originalEvent.stopPropagation();
-            e.originalEvent.preventDefault();
-          }
-          console.log('Label clicked for county:', countyName);
+          e.originalEvent.stopPropagation();
           switchMainCounty(countyId);
-        });
-        
-        // Prevent map interaction on label touch/click
-        label.on('mousedown touchstart', function(e) {
-          if (e.originalEvent) {
-            e.originalEvent.stopPropagation();
-          }
         });
         
         map.addLayer(label);
         countyLabels.push(label);
-        console.log('Created label for', countyName, 'at position', labelPosition);
       }
     }
   });
-  
-  console.log('Finished updating labels, total labels created:', countyLabels.length);
 }
 
 // Add map event listeners for immediate label repositioning
@@ -157,52 +139,93 @@ function getCountyStyle(isMainCounty) {
   };
 }
 
-// Place label within 15% of border, close to current map view, only if visible
+// Place label within 10% of border, floating toward map center, only if majority visible
 function getBestLabelPosition(layer, countyId) {
   var countyBounds = layer.getBounds();
   var mapBounds = map.getBounds();
-  
+
   // Get the intersection of county and current map view
   var viewSouth = Math.max(countyBounds.getSouth(), mapBounds.getSouth());
   var viewNorth = Math.min(countyBounds.getNorth(), mapBounds.getNorth());
   var viewWest = Math.max(countyBounds.getWest(), mapBounds.getWest());
   var viewEast = Math.min(countyBounds.getEast(), mapBounds.getEast());
-  
+
   // If county not visible in current view, return null (don't show label)
   if (viewSouth >= viewNorth || viewWest >= viewEast) {
     return null;
   }
-  
-  // Calculate 5% inward from the visible borders
-  var heightBuffer = (viewNorth - viewSouth) * 0.05;
-  var widthBuffer = (viewEast - viewWest) * 0.05;
-  
-  // Try multiple positions within the 5% border zone
+
+  // Calculate 10% inward from the visible borders
+  var heightBuffer = (viewNorth - viewSouth) * 0.10;
+  var widthBuffer = (viewEast - viewWest) * 0.10;
+
+  // Prefer positions closer to the map center, but still within the 10% zone
+  var mapCenter = map.getCenter();
+  var centerLat = mapCenter.lat;
+  var centerLng = mapCenter.lng;
+  var midLat = (viewSouth + viewNorth) / 2;
+  var midLng = (viewWest + viewEast) / 2;
+
   var candidatePositions = [
-    // Southwest corner of 5% zone
-    [viewSouth + heightBuffer, viewWest + widthBuffer],
-    // Southeast corner of 5% zone  
-    [viewSouth + heightBuffer, viewEast - widthBuffer],
-    // Northwest corner of 5% zone
-    [viewNorth - heightBuffer, viewWest + widthBuffer],
-    // Northeast corner of 5% zone
-    [viewNorth - heightBuffer, viewEast - widthBuffer],
+    // Closest to map center within 10% zone
+    [
+      Math.max(viewSouth + heightBuffer, Math.min(centerLat, viewNorth - heightBuffer)),
+      Math.max(viewWest + widthBuffer, Math.min(centerLng, viewEast - widthBuffer))
+    ],
     // Center of visible area
-    [(viewSouth + viewNorth) / 2, (viewWest + viewEast) / 2]
+    [midLat, midLng],
+    // Corners of 10% zone
+    [viewSouth + heightBuffer, viewWest + widthBuffer],
+    [viewSouth + heightBuffer, viewEast - widthBuffer],
+    [viewNorth - heightBuffer, viewWest + widthBuffer],
+    [viewNorth - heightBuffer, viewEast - widthBuffer]
   ];
-  
+
   // Find the first position that's actually inside the polygon
   for (var i = 0; i < candidatePositions.length; i++) {
     var pos = candidatePositions[i];
     var latLng = L.latLng(pos[0], pos[1]);
-    
     if (pointInPolygon(latLng, layer)) {
       return latLng;
     }
   }
-  
+
   // If none of the candidate positions work, fall back to county center
   return countyBounds.getCenter();
+}
+
+// Estimate the visible area ratio of a polygon in the current map view
+function getVisibleAreaRatio(layer) {
+  // Use a simple grid sampling approach for estimation
+  var bounds = layer.getBounds();
+  var mapBounds = map.getBounds();
+  var minLat = Math.max(bounds.getSouth(), mapBounds.getSouth());
+  var maxLat = Math.min(bounds.getNorth(), mapBounds.getNorth());
+  var minLng = Math.max(bounds.getWest(), mapBounds.getWest());
+  var maxLng = Math.min(bounds.getEast(), mapBounds.getEast());
+  if (minLat >= maxLat || minLng >= maxLng) return 0;
+
+  var total = 0, inside = 0;
+  var steps = 10; // 10x10 grid
+  for (var i = 0; i <= steps; i++) {
+    var lat = minLat + (maxLat - minLat) * (i / steps);
+    for (var j = 0; j <= steps; j++) {
+      var lng = minLng + (maxLng - minLng) * (j / steps);
+      total++;
+      if (pointInPolygon(L.latLng(lat, lng), layer)) inside++;
+    }
+  }
+  // Estimate visible area as fraction of grid points inside polygon and map view
+  var polygonTotal = 0;
+  for (var i = 0; i <= steps; i++) {
+    var lat = bounds.getSouth() + (bounds.getNorth() - bounds.getSouth()) * (i / steps);
+    for (var j = 0; j <= steps; j++) {
+      var lng = bounds.getWest() + (bounds.getEast() - bounds.getWest()) * (j / steps);
+      if (pointInPolygon(L.latLng(lat, lng), layer)) polygonTotal++;
+    }
+  }
+  if (polygonTotal === 0) return 0;
+  return inside / polygonTotal;
 }
 
 // Check if a point is inside a polygon using ray casting algorithm
