@@ -13,7 +13,7 @@ Interactive US County Mapper that auto-detects your location and displays nearby
 
 ## Live Demo
 
-Visit: **[hydrospheric0.github.io](https://hydrospheric0.github.io)**
+Visit: **[https://hydrospheric0.github.io/countymapper/](https://hydrospheric0.github.io/countymapper/)**
 
 ## Usage
 
